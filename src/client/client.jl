@@ -4,7 +4,8 @@ export Client,
     disable_cache!,
     add_handler!,
     delete_handler!,
-    DEFAULT_HANDLER_TAG
+    DEFAULT_HANDLER_TAG,
+    Certification
 
 include("limiter.jl")
 include("state.jl")
@@ -29,6 +30,49 @@ const DEFAULT_STRATEGIES = Dict{DataType, CacheStrategy}(
 mutable struct Conn
     io
     v::Int
+end
+
+module Certification
+    abstract type T end
+    struct Bearer <: T end
+    struct Bot <: T end
+end
+
+function Base.convert(AbstractString, x::Certification.Bearer) "Bearer" end
+function Base.convert(AbstractString, x::Certification.Bot) "Bot" end
+function Base.convert(AbstractString, x::K) where K <: Certification.T
+    convert(AbstractString, x)
+end
+
+# TODO(kavorite): persist OAuth expiry information; allow for obtaining from the API
+# (localhost web-hook? idn).
+"""
+    AuthToken(
+        value::AbstractString,
+        kind::Union{Certification.T, AbstractString}=Certification.Bot
+    )
+
+An authentication token for the Discord API. Primarily useful for authenticating
+[`Client`](@ref); allows the specification of an authentication flow from whence
+the given token `value` derives, either as a string, or one of Discord's two
+supported mechanisms — Bot tokens and [OAuth2][] `Bearer` authorization.
+
+[OAuth2]: https://discordapp.com/developers/docs/topics/oauth2
+"""
+struct AuthToken
+    kind::Union{Certification.T, AbstractString, Nothing}
+    value::AbstractString
+
+    function AuthToken(value, kind=Certification.Bot)
+        kind = kind
+        value = value
+    end
+end
+
+function Base.convert(AbstractString, token::AuthToken)
+    value = token.value
+    kind = convert(AbstractString, token.kind)
+    kind != nothing ? "$kind $value" : value
 end
 
 """
@@ -89,7 +133,7 @@ shards that are created. See the
 for more details.
 """
 mutable struct Client
-    token::String                # Bot token, always with a leading "Bot ".
+    token::AuthToken             # Authenticated token
     hb_interval::Int             # Milliseconds between heartbeats.
     hb_seq::Union{Int, Nothing}  # Sequence value sent by Discord for resuming.
     last_hb::DateTime            # Last heartbeat send.
@@ -108,13 +152,13 @@ mutable struct Client
     handlers::Dict{Type{<:AbstractEvent}, Dict{Symbol, AbstractHandler}}  # Event handlers.
 
     function Client(
-        token::String;
+        token::AuthToken;
         prefix::Union{AbstractString, AbstractChar}="",
         presence::Union{Dict, NamedTuple}=Dict(),
         strategies::Dict{DataType, <:CacheStrategy}=Dict{DataType, CacheStrategy}(),
         version::Int=API_VERSION,
     )
-        token = startswith(token, "Bot ") ? token : "Bot $token"
+        token = convert(AbstractString, token)
         state = State(merge(DEFAULT_STRATEGIES, strategies))
         conn = Conn(nothing, 0)
         prefix = string(prefix)
