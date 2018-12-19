@@ -5,7 +5,8 @@ export Client,
     add_handler!,
     delete_handler!,
     DEFAULT_HANDLER_TAG,
-    Certification
+    Certification,
+    AuthToken
 
 include("limiter.jl")
 include("state.jl")
